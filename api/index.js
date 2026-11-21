@@ -2,8 +2,13 @@
 // Data lives in Upstash Redis when connected (permanent); otherwise in /tmp (temporary).
 const fs = require('fs');
 const KEY = process.env.SYNC_KEY || 'shared-key';
-const R_URL = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL || '';
-const R_TOKEN = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN || '';
+function envFind(re) {
+  const k = Object.keys(process.env).find((n) => re.test(n) && !/READ_ONLY/.test(n));
+  return k ? process.env[k] : '';
+}
+// Works with whatever names Vercel/Upstash gave the variables (KV_REST_API_*, UPSTASH_REDIS_REST_*, ...)
+const R_URL = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL || envFind(/REST.*URL$/);
+const R_TOKEN = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN || envFind(/REST.*TOKEN$/);
 const FILE = '/tmp/schedule-data.json';
 const EMPTY = () => ({ ticks: {}, notes: [], sched: {}, log: [], nid: 1 });
 
@@ -47,7 +52,11 @@ module.exports = async (req, res) => {
 
   const u = new URL(req.url, 'http://x');
   const path = u.pathname.replace(/^\/api/, '').replace(/\/+$/, '') || '/';
-  if (path === '/health' || path === '/') return send(200, { ok: true, store: R_URL && R_TOKEN ? 'redis' : 'tmp' });
+  if (path === '/health' || path === '/') return send(200, {
+    ok: true, store: R_URL && R_TOKEN ? 'redis' : 'tmp', hasUrl: !!R_URL, hasToken: !!R_TOKEN,
+    // names only (never values), to help find the right variables
+    envNames: Object.keys(process.env).filter((n) => /REDIS|KV_|UPSTASH|STORAGE/i.test(n)),
+  });
 
   const body = req.method === 'GET' || req.method === 'DELETE' ? {} : await readBody(req);
   const key = req.headers['x-sync-key'] || u.searchParams.get('key') || body.key;
@@ -104,3 +113,4 @@ module.exports = async (req, res) => {
     return send(404, { error: 'not found' });
   } catch (e) { return send(500, { error: String(e && e.message) }); }
 };
+                                              
